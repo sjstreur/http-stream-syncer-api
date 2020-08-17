@@ -19,13 +19,14 @@ const port = 3000;
 
 
 const JSONDBHelper = require('./JSONDBHelper');
-const JSONDB = new JSONDBHelper('C:/Users/stefa/Desktop/projects/silent disco/stream syncer/api/src/db.json');
+const JSONDB = new JSONDBHelper('./src/db.json');
 
 const readline = require('readline-sync');
 const { get } = require('http');
 // const streamingUrl = readline.question('URL of audio stream: ');
 
 const streamingUrl = "http://192.168.178.16:4000/stream/swyh.mp3";
+// const streamingUrl = "http://icecast.omroep.nl/funx-bb-mp3";
 
 const setCORSsettings = require('./cors').setCORSsettings;
 
@@ -37,12 +38,33 @@ app.get('/', (req, res) => {
 
 app.get('/streaming-info', async (req, res) => {
     let streamingUrl = await JSONDB.getData('streamingUrl');
+    console.log(streamingUrl);
+    
     let streamLeader = await JSONDB.getData('currentUsers') > 1 ? false : true;
 
     res.send({
         streamingUrl,
         streamLeader
     });
+});
+
+app.post('/readyToPlay', async (req, res) => {
+    let currentlyReadyUsers = await JSONDB.getData(DataProperties.readyClients);
+
+    if (!currentlyReadyUsers && currentlyReadyUsers !== 0) currentlyReadyUsers = 0;
+    
+    currentlyReadyUsers++;
+
+    await JSONDB.upsertProperty(DataProperties.readyClients, currentlyReadyUsers);
+
+    if (currentlyReadyUsers === clientCount()) {
+        io.emit('goPlay');
+    }
+
+    io.emit('readyUsersChange', currentlyReadyUsers);
+    console.log(currentlyReadyUsers);
+    
+    res.status(204);
 });
 
 http.listen(port);
@@ -57,6 +79,7 @@ http.on('listening', async () => {
     try {
         await JSONDB.upsertProperty('streamingUrl', streamingUrl);
         await JSONDB.upsertProperty('currentUsers', 0);
+        await JSONDB.upsertProperty(DataProperties.readyClients, 0);
     } catch (error) {
         throw new Error(error);
     }
@@ -70,6 +93,10 @@ io.on('connection', async (socket) => {
         throw new Error(error);
     }
     io.emit('currentUserChange', clientCount());
+
+    socket.on('play', () => {
+        io.emit('startPlaying');
+    });
 });
   
 io.on('disconnect', async (socket) => {
@@ -84,5 +111,11 @@ io.on('disconnect', async (socket) => {
 
 function clientCount() {
     return io.sockets.server.engine.clientsCount;
+}
+
+const DataProperties = {
+    currentUsers: 'currentUsers',
+    streamingUrl: 'streamingUrl',
+    readyClients: 'readyClients'
 }
   
